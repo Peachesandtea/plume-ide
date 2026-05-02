@@ -1,0 +1,12 @@
+{
+  "name": "forge-ide",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "backend": "cd backend && npm install && node src/index.js",
+    "frontend": "cd frontend && npm install && npm run dev",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && node --watch src/index.js",
+    "dev:frontend": "cd frontend && npm run dev"
+  }
+}
