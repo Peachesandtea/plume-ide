@@ -14,6 +14,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import fg from 'fast-glob';
+import { registerVueTools } from './mcp-vue.js';
 
 import {
   getProjectRoot,
@@ -97,10 +98,47 @@ export function buildMcpServer() {
     const lines = entries.map(e => `${e.type === 'dir' ? 'd' : 'f'} ${e.path}`);
     return { content: [{ type: 'text', text: lines.join('\n') || '(empty)' }] };
   });
+  
+  server.registerTool('project_tree', {
+  title: 'Project Tree',
+  description: 'Output the full project file structure as a nested tree',
+  inputSchema: { path: z.string().default('').describe('Relative path from project root to start from') },
+}, async ({ path }) => {
+  const IGNORE = new Set([
+    'node_modules', '.git', '.svn', 'dist', 'build', '.next', '.nuxt',
+    'coverage', '.cache', '__pycache__', '.DS_Store', 'out', '.turbo',
+  ]);
+
+  async function buildTree(dirPath, depth = 0) {
+  const entries = await rawList(dirPath);
+  const filtered = entries.filter(e => !IGNORE.has(e.path.split('/').pop()));
+
+  const lines = [];
+  const indent = ' '.repeat(depth);
+
+  for (const e of filtered) {
+    const name = e.path.split('/').pop();
+    if (e.type === 'dir') {
+      lines.push(`${indent}${name}/`);
+      const children = await buildTree(e.path, depth + 1);
+      if (children) lines.push(children);
+    } else {
+      lines.push(`${indent}${name}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+  const tree = await buildTree(path);
+  const root = path || '.';
+  return {
+    content: [{ type: 'text', text: `${root}\n${tree || '(empty)'}` }],
+  };
+});
 
   server.registerTool('search_files', {
     title: 'Search Files by Name',
-    description: 'Find files whose names match a search query.',
+    description: 'Find files whose names match a query.',
     inputSchema: { query: z.string().describe('Filename query') },
   }, async ({ query }) => {
     const matches = await rawSearch(query);
@@ -162,7 +200,12 @@ export function buildMcpServer() {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }
   });
-
+  
+  registerVueTools(server, {
+  getProjectRoot,
+  rawWrite,
+});
+/*
   server.registerTool('shell_exec', {
     title: 'Execute Shell Command',
     description: 'Run a shell command in the project directory.',
@@ -178,7 +221,7 @@ export function buildMcpServer() {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
     }
   });
-
+*/
   // ── RESOURCES ──────────────────────────────────────────────────────────────
 
   server.registerResource('project-root', 'forge://project/root', {
