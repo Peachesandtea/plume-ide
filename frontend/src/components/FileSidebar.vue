@@ -1,5 +1,5 @@
 <template>
-  <Teleport to="body">
+<Teleport to="body">
     <aside class="sidebar" :class="{ open: modelValue }" aria-hidden="!modelValue">
       <div class="sidebar-backdrop" @click="$emit('update:modelValue', false)" />
 
@@ -226,8 +226,18 @@ async function refresh() {
 }
 
 // Refresh whenever connected or projectRoot changes
+// Also close all open editor tabs when the folder changes so stale files
+// from the previous project are not left open.
 watch(() => socket.status, (s) => { if (s === 'connected') refresh(); }, { immediate: true });
-watch(() => socket.projectRoot, () => { if (socket.status === 'connected') refresh(); });
+watch(() => socket.projectRoot, (newRoot, oldRoot) => {
+  if (socket.status === 'connected') {
+    // Only close tabs when the root actually changes (not the initial set)
+    if (oldRoot && newRoot !== oldRoot) {
+      editorStore.closeAllTabs();
+    }
+    refresh();
+  }
+});
 
 // Live tree updates from backend file watcher
 let fsChangeTimer;
@@ -288,7 +298,7 @@ async function changeRoot() {
   try {
     await socket.fs.setRoot(newRootPath.value.trim());
     showChangeRoot.value = false;
-    // projectRoot watcher will trigger refresh
+    // projectRoot watcher will close all tabs and trigger refresh
   } catch (err) {
     rootError.value = err.message;
   } finally {

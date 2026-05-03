@@ -69,6 +69,16 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  function closeAllTabs() {
+    // Cancel all pending saves
+    for (const [path, timer] of saveTimers) {
+      clearTimeout(timer);
+      saveTimers.delete(path);
+    }
+    tabs.value = [];
+    activeTabPath.value = null;
+  }
+
   function updateContent(path, content) {
     const idx = tabs.value.findIndex(t => t.path === path);
     if (idx === -1) return;
@@ -113,6 +123,7 @@ export const useEditorStore = defineStore('editor', () => {
     openFile,
     openFileAtLine,
     closeTab,
+    closeAllTabs,
     updateContent,
     saveFile,
     saveActive,
