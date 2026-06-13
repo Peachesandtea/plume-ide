@@ -1,1 +1,16 @@
 node_modules/
+
+# Vite build output
+frontend/dist/
+
+# Capacitor Android build artifacts
+frontend/android/.gradle/
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/capacitor-cordova-android-plugins/build/
+
+# Android local machine config (SDK path etc.)
+frontend/android/local.properties
+
+# OS
+.DS_Store

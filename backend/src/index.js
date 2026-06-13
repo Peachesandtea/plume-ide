@@ -35,7 +35,6 @@ const require = createRequire(import.meta.url);
 
 const PORT  = process.env.PORT  || 3001;
 const HOST  = '127.0.0.1';
-const SECRET_TOKEN      = process.env.FORGE_TOKEN      || generateToken();
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 let   currentModel      = process.env.AI_MODEL         || 'claude-opus-4-5';
 
@@ -56,18 +55,12 @@ function logChange(action, details) {
   log('change', msg, typeof details === 'object' ? details : null);
 }
 
-function generateToken() {
-  const token = randomBytes(32).toString('hex');
-  console.log(`\n🔑 FORGE AUTH TOKEN: ${token}\n`);
-  return token;
-}
-
-// ─── Authenticated clients ────────────────────────────────────────────────────
-const authenticatedClients = new Set();
+// ─── Connected clients ────────────────────────────────────────────────────────
+const connectedClients = new Set();
 
 function broadcast(data) {
   const msg = JSON.stringify(data);
-  for (const ws of authenticatedClients) {
+  for (const ws of connectedClients) {
     if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
 }
@@ -162,34 +155,21 @@ connectInProcess('forge-ide', buildMcpServer).then(result => {
   }
 }).catch(err => console.warn(`⚠️  forge-ide MCP setup error: ${err.message}`));
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', (ws) => {
   const clientId = randomBytes(8).toString('hex');
+  connectedClients.add(ws);
   console.log(`[${clientId}] Connected`);
-  send(ws, { type: 'auth:challenge', clientId });
+  send(ws, serverInfo());
 
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); }
     catch { return sendError(ws, null, 'Invalid JSON'); }
-
-    if (msg.type === 'auth:token') {
-      if (msg.token === SECRET_TOKEN) {
-        authenticatedClients.add(ws);
-        send(ws, { type: 'auth:ok', clientId });
-        send(ws, serverInfo());
-        console.log(`[${clientId}] Authenticated`);
-      } else {
-        send(ws, { type: 'auth:fail', error: 'Invalid token' });
-        ws.close();
-      }
-      return;
-    }
-    if (!authenticatedClients.has(ws)) return sendError(ws, msg.id, 'Unauthorized');
     await handleMessage(ws, msg, clientId);
   });
 
   ws.on('close', () => {
-    authenticatedClients.delete(ws);
+    connectedClients.delete(ws);
     for (const [, session] of ptySessions) session.clients.delete(ws);
   });
   ws.on('error', e => console.error(`[${clientId}] Error:`, e.message));

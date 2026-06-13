@@ -10,7 +10,7 @@ export const useSocketStore = defineStore('socket', () => {
   const pendingRequests = new Map();
   let msgIdCounter = 0;
 
-  function connect(url, token) {
+  function connect(url) {
     if (ws.value?.readyState === WebSocket.OPEN) return;
 
     status.value = 'connecting';
@@ -20,31 +20,15 @@ export const useSocketStore = defineStore('socket', () => {
     ws.value = socket;
 
     socket.onopen = () => {
-      status.value = 'authenticating';
-      console.log('[WS] Connected, awaiting auth challenge...');
+      status.value = 'connected';
+      console.log('[WS] Connected');
     };
 
     socket.onmessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
 
-      // Auth flow
-      if (msg.type === 'auth:challenge') {
-        socket.send(JSON.stringify({ type: 'auth:token', token }));
-        return;
-      }
-      if (msg.type === 'auth:ok') {
-        status.value = 'connected';
-        console.log('[WS] ✅ Authenticated');
-        return;
-      }
-      if (msg.type === 'auth:fail') {
-        status.value = 'error';
-        error.value = 'Authentication failed — check your token';
-        socket.close();
-        return;
-      }
-      // Server info push (sent after auth:ok and after setRoot)
+      // Server info push (sent on connect and after setRoot)
       if (msg.type === 'server:info') {
         projectRoot.value = msg.projectRoot || '';
         platform.value = msg.platform || '';
@@ -98,7 +82,7 @@ export const useSocketStore = defineStore('socket', () => {
         return reject(new Error('Not connected'));
       }
       if (status.value !== 'connected') {
-        return reject(new Error('Not authenticated'));
+        return reject(new Error('Not connected'));
       }
       const id = `req_${++msgIdCounter}`;
       pendingRequests.set(id, { resolve, reject });

@@ -24,6 +24,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const termFontSize    = ref(saved.termFontSize    ?? 13);
   const anthropicKey    = ref(saved.anthropicKey    ?? '');
   const aiModel         = ref(saved.aiModel         ?? 'claude-opus-4-5');
+  const backendPath     = ref(saved.backendPath     ?? '');
 
   // Server log buffer (not persisted)
   const serverLogs      = ref([]);   // [{ ts, level, msg }]
@@ -42,11 +43,12 @@ export const useSettingsStore = defineStore('settings', () => {
       termFontSize: termFontSize.value,
       anthropicKey: anthropicKey.value,
       aiModel: aiModel.value,
+      backendPath: backendPath.value,
     }));
   }
 
   watch([serverLogging, theme, fontSize, tabSize, wordWrap,
-         autoSaveDelay, showMinimap, termFontSize, anthropicKey, aiModel], persist);
+         autoSaveDelay, showMinimap, termFontSize, anthropicKey, aiModel, backendPath], persist);
 
   // ─── Sync serverLogging toggle to backend ─────────────────────────────────
   watch(serverLogging, (val) => {
@@ -80,7 +82,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     serverLogging, theme, fontSize, tabSize, wordWrap,
-    autoSaveDelay, showMinimap, termFontSize, anthropicKey, aiModel,
+    autoSaveDelay, showMinimap, termFontSize, anthropicKey, aiModel, backendPath,
     serverLogs, addLog, clearLogs,
   };
 });
