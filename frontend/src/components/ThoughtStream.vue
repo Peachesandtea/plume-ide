@@ -12,7 +12,7 @@
             running · iter {{ agentStore.iterations }}
           </span>
           <span v-else-if="agentStore.done" class="thought-status done">✓ done</span>
-          <span v-else-if="agentStore.error" class="thought-status error">⚠ error</span>
+          <span v-else-if="agentStore.error" class="thought-status error" :title="agentStore.error">⚠ {{ agentStore.error }}</span>
         </div>
         <div class="thought-header-right" @click.stop>
           <button v-if="agentStore.running" class="thought-btn cancel" @click="agentStore.cancelTask()">
@@ -250,7 +250,7 @@ function forgeToolIcon(name) {
 }
 .thought-status.running { background: var(--accent-dim); color: var(--accent-bright); }
 .thought-status.done { background: var(--green-dim); color: var(--green); }
-.thought-status.error { background: var(--red-dim); color: var(--red); }
+.thought-status.error { background: var(--red-dim); color: var(--red); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-dot-anim {
   width: 6px; height: 6px; border-radius: 50%; background: currentColor;
   animation: pulse-glow 1s infinite;

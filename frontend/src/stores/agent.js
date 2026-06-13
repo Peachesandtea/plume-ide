@@ -42,6 +42,7 @@ export const useAgentStore = defineStore('agent', () => {
     } catch (err) {
       error.value = err.message;
       running.value = false;
+      addThought({ type: 'agent:error', error: err.message });
     }
   }
 

@@ -36,7 +36,7 @@ const require = createRequire(import.meta.url);
 const PORT  = process.env.PORT  || 3001;
 const HOST  = '127.0.0.1';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-let   currentModel      = process.env.AI_MODEL         || 'claude-opus-4-5';
+let   currentModel      = process.env.AI_MODEL         || 'claude-sonnet-4-6';
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 let loggingEnabled = true;

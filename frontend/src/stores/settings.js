@@ -23,7 +23,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const showMinimap     = ref(saved.showMinimap     ?? false);
   const termFontSize    = ref(saved.termFontSize    ?? 13);
   const anthropicKey    = ref(saved.anthropicKey    ?? '');
-  const aiModel         = ref(saved.aiModel         ?? 'claude-opus-4-5');
+  const aiModel         = ref(saved.aiModel         ?? 'claude-sonnet-4-6');
   const backendPath     = ref(saved.backendPath     ?? '');
 
   // Server log buffer (not persisted)
