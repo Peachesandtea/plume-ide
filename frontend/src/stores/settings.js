@@ -64,11 +64,21 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   });
 
+  // ─── Sync anthropicKey to backend on change ───────────────────────────────
+  watch(anthropicKey, (val) => {
+    if (socket.status === 'connected') {
+      socket.request('settings:setApiKey', { apiKey: val }).catch(() => {});
+    }
+  });
+
   // Send current prefs once connected
   watch(() => socket.status, (s) => {
     if (s === 'connected') {
       socket.request('settings:setLog', { enabled: serverLogging.value }).catch(() => {});
       socket.request('settings:setModel', { model: aiModel.value }).catch(() => {});
+      if (anthropicKey.value) {
+        socket.request('settings:setApiKey', { apiKey: anthropicKey.value }).catch(() => {});
+      }
     }
   });
 

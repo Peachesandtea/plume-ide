@@ -35,7 +35,7 @@ const require = createRequire(import.meta.url);
 
 const PORT  = process.env.PORT  || 3001;
 const HOST  = '127.0.0.1';
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+let ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 let   currentModel      = process.env.AI_MODEL         || 'claude-sonnet-4-6';
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
@@ -250,6 +250,11 @@ async function handleMessage(ws, msg, clientId) {
         currentModel = payload.model;
         logChange('settings:setModel', { model: currentModel });
         return send(ws, { id, result: { model: currentModel } });
+      }
+      case 'settings:setApiKey': {
+        ANTHROPIC_API_KEY = (payload.apiKey || '').trim();
+        console.log(`🔑 [forge] Anthropic API key ${ANTHROPIC_API_KEY ? 'set' : 'cleared'}`);
+        return send(ws, { id, result: { hasAI: !!ANTHROPIC_API_KEY } });
       }
       // Shell
       case 'shell:exec':      return send(ws, { id, result: await shellExec(payload) });
