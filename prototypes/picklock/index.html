@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b10">
+<title>Picklock Timing Lock</title>
+<style>
+  :root {
+    --bg-void: #0b0b10;
+    --bg-surface: #13131b;
+    --bg-raised: #1b1b26;
+    --bg-hover: #242434;
+    --accent: #9d8fff;
+    --text-primary: #e8e8f2;
+    --text-muted: #8b8ba0;
+    --border-subtle: #2a2a3a;
+    --good: #6ee7a8;
+    --bad: #ff6b7a;
+    --font-ui: Geist, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg-void); color: var(--text-primary);
+    font-family: var(--font-ui);
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  .app {
+    height: 100dvh; display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    max-width: 720px; margin: 0 auto;
+  }
+
+  /* ---- HUD ---- */
+  .hud { padding: 12px 16px 4px; display: flex; flex-direction: column; gap: 10px; }
+  .levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .levels button {
+    background: var(--bg-surface); color: var(--text-muted);
+    border: 1px solid var(--border-subtle); border-radius: 8px;
+    padding: 8px 4px; font: inherit; font-size: 13px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .levels button small { font-size: 10px; opacity: .7; }
+  .levels button[aria-pressed="true"] {
+    color: var(--text-primary); border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-surface));
+  }
+  .stats { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
+  .pins, .picks { display: flex; gap: 8px; align-items: center; }
+  .pin {
+    width: 14px; height: 22px; border-radius: 4px 4px 7px 7px;
+    background: var(--bg-raised); border: 1px solid var(--border-subtle);
+    transition: transform .15s, background .15s, box-shadow .15s;
+  }
+  .pin.on { background: var(--good); border-color: var(--good); transform: translateY(-4px); box-shadow: 0 0 10px color-mix(in srgb, var(--good) 55%, transparent); }
+  .pin.perfect { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent); }
+  .picks svg { width: 24px; height: 24px; color: var(--text-primary); transition: opacity .2s, color .2s; }
+  .picks svg.gone { opacity: .22; color: var(--bad); }
+  .mute {
+    background: none; border: 1px solid var(--border-subtle); color: var(--text-muted);
+    border-radius: 8px; font: inherit; font-size: 12px; padding: 6px 10px; cursor: pointer;
+  }
+  .toast {
+    height: 22px; text-align: center; font-size: 14px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-muted); opacity: 0;
+  }
+  .toast.show { animation: toast .7s ease-out; }
+  .toast.good { color: var(--good); } .toast.perfect { color: var(--accent); } .toast.bad { color: var(--bad); }
+  @keyframes toast { 0% { opacity: 0; transform: translateY(6px); } 15% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* ---- Stage ---- */
+  .stage {
+    position: relative; flex: 1; min-height: 0; overflow: hidden;
+    display: grid; place-items: center; padding: 8px;
+    touch-action: none;   /* no scroll / zoom / double-tap while playing */
+  }
+  canvas { display: block; touch-action: none; }
+  .overlay {
+    position: absolute; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px;
+    background: color-mix(in srgb, var(--bg-void) 78%, transparent);
+    backdrop-filter: blur(3px);
+  }
+  .overlay.show { display: flex; }
+  .overlay h1 { margin: 0; font-size: 28px; letter-spacing: .02em; }
+  .overlay p { margin: 0; max-width: 28ch; color: var(--text-muted); line-height: 1.45; font-size: 15px; }
+  .overlay .btns { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; width: min(240px, 100%); }
+  .btn {
+    font: inherit; font-size: 16px; font-weight: 600; padding: 14px 20px; border-radius: 10px;
+    border: 1px solid var(--accent); background: var(--accent); color: #12101f; cursor: pointer;
+    min-height: 48px;
+  }
+  .btn.ghost { background: transparent; color: var(--text-primary); border-color: var(--border-subtle); }
+  .btn:focus-visible, .levels button:focus-visible, .mute:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .hint { padding: 4px 16px 14px; text-align: center; font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="hud">
+    <div class="levels" id="levels" role="group" aria-label="Lock difficulty"></div>
+    <div class="stats">
+      <div class="pins" id="pins" aria-label="Tumblers set"></div>
+      <div class="picks" id="picks" aria-label="Picks remaining"></div>
+      <button class="mute" id="mute" aria-pressed="false">Sound on</button>
+    </div>
+    <div class="toast" id="toast" aria-live="polite"></div>
+  </header>
+
+  <section class="stage" id="stage">
+    <canvas id="c" role="img" aria-label="Rotating lock. Tap when the needle crosses the glowing notch."></canvas>
+    <div class="overlay" id="overlay"></div>
+  </section>
+
+  <footer class="hint">Tap anywhere (or press Space) when the needle crosses the glowing notch</footer>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+/* =========================================================
+ *  Config - tweak these to tune the feel
+ * ========================================================= */
+const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
+
+const LEVELS = [
+  { name: 'Novice', pins: 3, half: 22, speed: 110 },   // half = notch half-width (deg), speed = deg/s
+  { name: 'Adept',  pins: 4, half: 18, speed: 130 },
+  { name: 'Expert', pins: 5, half: 14, speed: 150 },
+  { name: 'Master', pins: 6, half: 11, speed: 170 },
+];
+const PICKS            = 3;     // misses allowed before the pick snaps
+const SPEEDUP_PER_PIN  = 0.08;  // each set pin speeds the needle up by this fraction
+const PERFECT_FRACTION = 0.30;  // inner fraction of the notch that counts as "perfect"
+const MISS_LOCKOUT_MS  = 250;   // brief lockout after a miss to discourage mashing
+const MIN_TARGET_GAP   = 70 * DEG; // new notch is at least this far from the needle
+
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* =========================================================
+ *  Helpers
+ * ========================================================= */
+const $ = id => document.getElementById(id);
+const wrap = a => { a %= TAU; return a < 0 ? a + TAU : a; };
+const angDiff = (a, b) => { let d = wrap(a - b); if (d > Math.PI) d -= TAU; return d; }; // signed, (-pi, pi]
+const rand = (a, b) => a + Math.random() * (b - a);
+
+/* =========================================================
+ *  Audio (synthesised - no assets) + haptics
+ * ========================================================= */
+let ac = null, muted = false, noiseBuf = null;
+
+function audio() {
+  if (!ac) {
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { ac = null; }
+  }
+  if (ac && ac.state === 'suspended') ac.resume();
+  return ac;
+}
+function tone(freq, dur, type = 'sine', vol = 0.12, slide = 0, delay = 0) {
+  const c = audio(); if (!c || muted) return;
+  const t0 = c.currentTime + delay;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  if (slide) o.frequency.linearRampToValueAtTime(Math.max(20, freq + slide), t0 + dur);
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(c.destination);
+  o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function noise(dur, vol = 0.2, highpass = 1200) {
+  const c = audio(); if (!c || muted) return;
+  if (!noiseBuf) {
+    noiseBuf = c.createBuffer(1, c.sampleRate, c.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const s = c.createBufferSource(); s.buffer = noiseBuf;
+  const f = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = highpass;
+  const g = c.createGain(); const t0 = c.currentTime;
+  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(c.destination);
+  s.start(t0); s.stop(t0 + dur);
+}
+const buzz = pattern => { if (!muted && navigator.vibrate) { try { navigator.vibrate(pattern); } catch {} } };
+
+const sfx = {
+  hit(n, perfect) {
+    const base = 620 + n * 110;
+    tone(base, 0.05, 'square', 0.07);
+    tone(base * 2, 0.09, 'triangle', 0.09);
+    noise(0.03, 0.12, 4000);
+    if (perfect) { tone(base * 3, 0.18, 'sine', 0.08, 0, 0.04); buzz([12, 30, 12]); } else buzz(14);
+  },
+  miss() { tone(150, 0.2, 'sawtooth', 0.12, -70); noise(0.12, 0.12, 800); buzz(45); },
+  snap() { noise(0.28, 0.28, 1500); tone(320, 0.22, 'square', 0.1, -220); buzz([30, 40, 90]); },
+  win()  { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.1, 0, i * 0.09)); buzz([20, 40, 20, 40, 60]); },
+};
+
+/* =========================================================
+ *  Game state
+ * ========================================================= */
+const S = {
+  level: 0, phase: 'ready',          // ready | playing | won | broken
+  needle: 0, dir: 1, speed: 0,       // radians, +1 clockwise, rad/s
+  target: 0, half: 0,                // radians
+  set: [],                           // [{ c, perfect }]
+  picks: PICKS, perfects: 0,
+  plug: 0, plugTarget: 0,            // rotation of the inner cylinder (rad)
+  shake: 0, lockout: 0, frameT: performance.now(),
+  flash: null, bursts: [], overlayTimer: 0,
+};
+const cfg = () => LEVELS[S.level];
+
+function newLock() {
+  clearTimeout(S.overlayTimer);
+  const L = cfg();
+  Object.assign(S, {
+    phase: 'ready', set: [], picks: PICKS, perfects: 0, dir: 1,
+    speed: L.speed * DEG, half: L.half * DEG,
+    plug: 0, plugTarget: 0, shake: 0, lockout: 0, flash: null, bursts: [],
+  });
+  S.needle = rand(0, TAU);
+  renderLevels(); renderPins(); renderPicks();
+  showOverlay('ready');
+}
+
+function placeTarget() {
+  const minGap = 2 * S.half + 4 * DEG;
+  let c = 0;
+  for (let i = 0; i < 60; i++) {
+    c = rand(0, TAU);
+    if (Math.abs(angDiff(c, S.needle)) < MIN_TARGET_GAP) continue;
+    if (S.set.some(s => Math.abs(angDiff(c, s.c)) < minGap)) continue;
+    break;
+  }
+  S.target = c;
+}
+
+function start() {
+  S.phase = 'playing';
+  S.speed = cfg().speed * DEG;
+  placeTarget();
+  hideOverlay();
+}
+
+/* =========================================================
+ *  Input -> the one verb of this game: tap
+ * ========================================================= */
+function tap() {
+  const now = performance.now();
+  if (S.phase !== 'playing' || now < S.lockout) return;
+  audio();
+
+  // The needle has moved on since the last drawn frame - compensate so the tap is judged
+  // against where the needle really is *now*.
+  const ahead = Math.min(Math.max((now - S.frameT) / 1000, 0), 0.05);
+  const needleNow = wrap(S.needle + S.dir * S.speed * ahead);
+  const d = Math.abs(angDiff(needleNow, S.target));
+
+  if (d <= S.half) {
+    const perfect = d <= S.half * PERFECT_FRACTION;
+    S.set.push({ c: S.target, perfect });
+    if (perfect) S.perfects++;
+    S.bursts.push({ c: S.target, t0: now, perfect });
+    sfx.hit(S.set.length, perfect);
+    toast(perfect ? 'Perfect' : 'Set', perfect ? 'perfect' : 'good');
+    renderPins();
+
+    const total = cfg().pins;
+    if (S.set.length >= total) {
+      S.phase = 'won';
+      S.plugTarget = 100 * DEG;
+      sfx.win();
+      S.overlayTimer = setTimeout(() => showOverlay('won'), 750);
+    } else {
+      S.plugTarget = (S.set.length / total) * 80 * DEG;
+      S.speed = cfg().speed * DEG * (1 + SPEEDUP_PER_PIN * S.set.length);
+      S.dir = -S.dir;
+      placeTarget();
+    }
+  } else {
+    S.picks--;
+    S.lockout = now + MISS_LOCKOUT_MS;
+    S.flash = { t0: now };
+    S.shake = 1;
+    toast('Missed', 'bad');
+    renderPicks();
+    if (S.picks <= 0) {
+      S.phase = 'broken';
+      sfx.snap();
+      S.shake = 1.6;
+      S.overlayTimer = setTimeout(() => showOverlay('broken'), 600);
+    } else {
+      sfx.miss();
+    }
+  }
+}
+
+const stage = $('stage');
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('.overlay')) return;
+  e.preventDefault();
+  tap();
+});
+window.addEventListener('keydown', e => {
+  if ((e.code === 'Space' || e.code === 'Enter') && S.phase === 'playing') {
+    e.preventDefault();
+    if (!e.repeat) tap();
+  }
+});
+
+/* =========================================================
+ *  HUD / overlay DOM
+ * ========================================================= */
+const PICK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21 15 9c1.2-2.8 4.2-2.8 5.5-.5"/></svg>';
+
+function renderLevels() {
+  $('levels').innerHTML = LEVELS.map((l, i) =>
+    `<button type="button" data-level="${i}" aria-pressed="${i === S.level}">${l.name}<small>${l.pins} pins</small></button>`).join('');
+}
+function renderPins() {
+  $('pins').innerHTML = Array.from({ length: cfg().pins }, (_, i) => {
+    const s = S.set[i];
+    return `<i class="pin${s ? ' on' : ''}${s && s.perfect ? ' perfect' : ''}"></i>`;
+  }).join('');
+}
+function renderPicks() {
+  $('picks').innerHTML = Array.from({ length: PICKS }, (_, i) =>
+    PICK_SVG.replace('<svg', `<svg class="${i >= S.picks ? 'gone' : ''}"`)).join('');
+}
+const toastEl = $('toast');
+function toast(msg, kind) {
+  toastEl.className = 'toast ' + kind;
+  toastEl.textContent = msg;
+  void toastEl.offsetWidth;            // restart the CSS animation
+  toastEl.classList.add('show');
+}
+
+const overlay = $('overlay');
+function showOverlay(kind) {
+  const L = cfg();
+  const lastLevel = S.level === LEVELS.length - 1;
+  const views = {
+    ready:  ['Pick the lock', `Tap when the needle crosses the glowing notch. Set all ${L.pins} tumblers before your picks snap.`,
+             [['start', 'Start', '']]],
+    won:    ['Unlocked', `${S.picks} of ${PICKS} picks left${S.perfects ? ` · ${S.perfects} perfect` : ''}.`,
+             [['next', lastLevel ? 'Another lock' : 'Next lock', ''], ['again', 'Replay this lock', 'ghost']]],
+    broken: ['Pick snapped', `${S.set.length} of ${L.pins} tumblers were set.`,
+             [['again', 'Try again', '']]],
+  };
+  const [title, body, btns] = views[kind];
+  overlay.innerHTML = `<h1>${title}</h1><p>${body}</p><div class="btns">${
+    btns.map(([a, label, cls]) => `<button class="btn ${cls}" data-action="${a}">${label}</button>`).join('')}</div>`;
+  overlay.classList.add('show');
+  overlay.querySelector('button')?.focus({ preventScroll: true });
+}
+function hideOverlay() { overlay.classList.remove('show'); document.activeElement?.blur?.(); }
+
+overlay.addEventListener('click', e => {
+  const a = e.target.closest('button')?.dataset.action;
+  if (!a) return;
+  audio();                                   // first user gesture unlocks Web Audio
+  if (a === 'next' && S.level < LEVELS.length - 1) S.level++;
+  newLock(); start();
+});
+$('levels').addEventListener('click', e => {
+  const b = e.target.closest('button[data-level]');
+  if (!b) return;
+  S.level = +b.dataset.level; newLock();
+});
+$('mute').addEventListener('click', e => {
+  muted = !muted;
+  e.currentTarget.textContent = muted ? 'Sound off' : 'Sound on';
+  e.currentTarget.setAttribute('aria-pressed', muted);
+  if (!muted) audio();
+});
+
+/* =========================================================
+ *  Rendering
+ * ========================================================= */
+const canvas = $('c');
+const ctx = canvas.getContext('2d');
+let size = 300, dpr = 1;
+
+function resize() {
+  const r = stage.getBoundingClientRect();
+  size = Math.max(160, Math.floor(Math.min(r.width, r.height) - 16));
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.style.width = canvas.style.height = size + 'px';
+  canvas.width = canvas.height = Math.round(size * dpr);
+}
+new ResizeObserver(resize).observe(stage);
+
+// Point on circle: theta 0 = top, clockwise.
+const arc = (a0, a1, r) => ctx.arc(0, 0, r, a0 - Math.PI / 2, a1 - Math.PI / 2);
+const px = (n) => n * dpr;                      // shadowBlur is in device pixels, not user space
+
+function draw(now) {
+  const t = now / 1000;
+  const R = size / 2 * 0.93;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+
+  ctx.save();
+  let ox = 0, oy = 0;
+  if (S.shake > 0) { const k = reducedMotion ? 0.2 : 1; ox = rand(-1, 1) * S.shake * 5 * k; oy = rand(-1, 1) * S.shake * 5 * k; }
+  ctx.translate(size / 2 + ox, size / 2 + oy);
+  ctx.scale(R, R);                              // from here on, 1 unit = lock radius
+
+  // Bezel
+  let g = ctx.createRadialGradient(0, -0.3, 0.2, 0, 0, 1);
+  g.addColorStop(0, '#2c2c3b'); g.addColorStop(1, '#14141c');
+  ctx.beginPath(); ctx.arc(0, 0, 0.99, 0, TAU); ctx.fillStyle = g; ctx.fill();
+  g = ctx.createLinearGradient(-1, -1, 1, 1);
+  g.addColorStop(0, '#5a5a75'); g.addColorStop(0.5, '#25253a'); g.addColorStop(1, '#4a4a62');
+  ctx.lineWidth = 0.014; ctx.strokeStyle = g; ctx.stroke();
+
+  // Ticks
+  ctx.strokeStyle = '#3a3a52'; ctx.lineCap = 'butt';
+  for (let i = 0; i < 72; i++) {
+    const a = i * 5 * DEG, major = i % 6 === 0;
+    const r0 = 0.83, r1 = major ? 0.92 : 0.87;
+    ctx.lineWidth = major ? 0.012 : 0.007;
+    ctx.beginPath(); ctx.moveTo(Math.sin(a) * r0, -Math.cos(a) * r0); ctx.lineTo(Math.sin(a) * r1, -Math.cos(a) * r1); ctx.stroke();
+  }
+
+  // Track
+  const TR = 0.70, TW = 0.14;
+  ctx.beginPath(); ctx.arc(0, 0, TR, 0, TAU); ctx.lineWidth = TW; ctx.strokeStyle = '#0e0e15'; ctx.stroke();
+  ctx.lineWidth = 0.005; ctx.strokeStyle = '#2d2d42';
+  ctx.beginPath(); ctx.arc(0, 0, TR + TW / 2, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, TR - TW / 2, 0, TAU); ctx.stroke();
+
+  // Notches already set
+  for (const s of S.set) {
+    ctx.beginPath(); arc(s.c - S.half, s.c + S.half, TR);
+    ctx.lineWidth = TW; ctx.strokeStyle = s.perfect ? 'rgba(157,143,255,.38)' : 'rgba(110,231,168,.32)'; ctx.stroke();
+  }
+
+  // Active target notch
+  if (S.phase === 'playing') {
+    const pulse = 0.75 + 0.25 * Math.sin(t * 6);
+    ctx.save();
+    ctx.shadowColor = '#9d8fff'; ctx.shadowBlur = px(18 * pulse);
+    ctx.beginPath(); arc(S.target - S.half, S.target + S.half, TR);
+    ctx.lineWidth = TW; ctx.strokeStyle = `rgba(157,143,255,${0.55 + 0.35 * pulse})`; ctx.stroke();
+    ctx.restore();
+    // perfect zone + centre line
+    ctx.beginPath(); arc(S.target - S.half * PERFECT_FRACTION, S.target + S.half * PERFECT_FRACTION, TR);
+    ctx.lineWidth = TW; ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.stroke();
+    const sx = Math.sin(S.target), cy = -Math.cos(S.target);
+    ctx.beginPath(); ctx.moveTo(sx * (TR - TW / 2), cy * (TR - TW / 2)); ctx.lineTo(sx * (TR + TW / 2), cy * (TR + TW / 2));
+    ctx.lineWidth = 0.01; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.stroke();
+  }
+
+  // Miss flash
+  if (S.flash) {
+    const age = (now - S.flash.t0) / 300;
+    if (age >= 1) S.flash = null;
+    else { ctx.beginPath(); ctx.arc(0, 0, TR, 0, TAU); ctx.lineWidth = TW; ctx.strokeStyle = `rgba(255,107,122,${0.4 * (1 - age)})`; ctx.stroke(); }
+  }
+
+  // Hit bursts
+  S.bursts = S.bursts.filter(b => now - b.t0 < 500);
+  for (const b of S.bursts) {
+    const age = (now - b.t0) / 500;
+    ctx.beginPath(); arc(b.c - S.half * 1.2, b.c + S.half * 1.2, TR + TW / 2 + age * 0.2);
+    ctx.lineWidth = 0.02 * (1 - age) + 0.004;
+    ctx.strokeStyle = (b.perfect ? 'rgba(157,143,255,' : 'rgba(110,231,168,') + (1 - age) + ')'; ctx.stroke();
+  }
+
+  // Plug (the cylinder that turns as pins set)
+  ctx.save();
+  ctx.rotate(S.plug);
+  g = ctx.createRadialGradient(-0.15, -0.2, 0.05, 0, 0, 0.55);
+  g.addColorStop(0, '#454560'); g.addColorStop(1, '#1b1b27');
+  ctx.beginPath(); ctx.arc(0, 0, 0.55, 0, TAU); ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 0.012; ctx.strokeStyle = '#555570'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 0.47, 0, TAU); ctx.lineWidth = 0.006; ctx.strokeStyle = '#2b2b3d'; ctx.stroke();
+  // keyhole
+  ctx.fillStyle = '#06060a';
+  ctx.beginPath(); ctx.arc(0, -0.06, 0.07, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-0.035, -0.02); ctx.lineTo(0.035, -0.02); ctx.lineTo(0.055, 0.2); ctx.lineTo(-0.055, 0.2); ctx.closePath(); ctx.fill();
+  // screws
+  ctx.fillStyle = '#2e2e42';
+  for (const a of [45, 135, 225, 315]) { ctx.beginPath(); ctx.arc(Math.sin(a * DEG) * 0.4, -Math.cos(a * DEG) * 0.4, 0.016, 0, TAU); ctx.fill(); }
+  ctx.restore();
+
+  // Needle trail + needle
+  const live = S.phase === 'playing' || S.phase === 'ready';
+  if (live) {
+    for (let i = 14; i >= 1; i--) {
+      const a1 = S.needle - S.dir * (i - 1) * 2.4 * DEG, a0 = S.needle - S.dir * i * 2.4 * DEG;
+      ctx.beginPath(); arc(Math.min(a0, a1), Math.max(a0, a1), TR);
+      ctx.lineWidth = TW * 0.45; ctx.strokeStyle = `rgba(232,232,242,${0.2 * (1 - i / 15)})`; ctx.stroke();
+    }
+  }
+  const sn = Math.sin(S.needle), cn = -Math.cos(S.needle);
+  ctx.save();
+  ctx.shadowColor = '#ffffff'; ctx.shadowBlur = px(10);
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(sn * 0.5, cn * 0.5); ctx.lineTo(sn * 0.8, cn * 0.8);
+  ctx.lineWidth = 0.022; ctx.strokeStyle = '#f2f2fa'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(sn * TR, cn * TR, 0.034, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.restore();
+  // pivot cap
+  ctx.beginPath(); ctx.arc(0, 0, 0.028, 0, TAU); ctx.fillStyle = '#0a0a10'; ctx.fill();
+
+  ctx.restore();
+}
+
+/* =========================================================
+ *  Main loop
+ * ========================================================= */
+function frame(now) {
+  const dt = Math.max(0, Math.min((now - S.frameT) / 1000, 0.05));
+  S.frameT = now;
+
+  if (S.phase === 'playing') S.needle = wrap(S.needle + S.dir * S.speed * dt);
+  else if (S.phase === 'ready') S.needle = wrap(S.needle + 50 * DEG * dt);
+
+  S.plug += (S.plugTarget - S.plug) * (1 - Math.exp(-dt * 7));
+  S.shake = Math.max(0, S.shake - dt * 4);
+
+  draw(now);
+  requestAnimationFrame(frame);
+}
+
+// Test / debug hook for the prototype.
+window.__picklock = { S, tap, LEVELS };
+
+renderLevels();
+newLock();
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
