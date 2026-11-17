@@ -85,7 +85,7 @@
   }
   .overlay.show { display: flex; }
   .overlay h1 { margin: 0; font-size: 28px; letter-spacing: .02em; }
-  .overlay p { margin: 0; max-width: 28ch; color: var(--text-muted); line-height: 1.45; font-size: 15px; }
+  .overlay p { margin: 0; max-width: 34ch; color: var(--text-muted); line-height: 1.45; font-size: 15px; }
   .overlay .btns { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; width: min(240px, 100%); }
   .btn {
     font: inherit; font-size: 16px; font-weight: 600; padding: 14px 20px; border-radius: 10px;
@@ -139,7 +139,7 @@ const SPEEDUP_PER_PIN  = 0.08;  // each set pin speeds the needle up by this fra
 const PERFECT_FRACTION = 0.30;  // inner fraction of the notch that counts as "perfect"
 const MISS_LOCKOUT_MS  = 250;   // brief lockout after a miss to discourage mashing
 const MIN_TARGET_GAP   = 70 * DEG; // new notch is at least this far from the needle
-const SHRINK_FACTOR    = 0.85;  // any non-perfect attempt makes the next notch 15% smaller (compounds)
+const SHRINK_FACTOR    = 0.90;  // a non-perfect hit makes the next notch 10% smaller (compounds)
 const MIN_HALF_DEG     = 3;     // floor so a notch can never shrink to something unhittable
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -201,6 +201,7 @@ const sfx = {
     if (perfect) { tone(base * 3, 0.18, 'sine', 0.08, 0, 0.04); buzz([12, 30, 12]); } else buzz(14);
   },
   miss() { tone(150, 0.2, 'sawtooth', 0.12, -70); noise(0.12, 0.12, 800); buzz(45); },
+  drop() { tone(260, 0.2, 'triangle', 0.12, -140); noise(0.08, 0.1, 600); buzz([25, 35, 25]); },
   snap() { noise(0.28, 0.28, 1500); tone(320, 0.22, 'square', 0.1, -220); buzz([30, 40, 90]); },
   win()  { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.1, 0, i * 0.09)); buzz([20, 40, 20, 40, 60]); },
 };
@@ -245,7 +246,7 @@ function placeTarget() {
   S.target = c;
 }
 
-// A perfect hit restores the full-size notch; anything else shrinks the next one by 15%.
+// A perfect hit restores the full-size notch; a non-perfect hit shrinks the next one by 10%.
 function nextHalf(perfect) {
   return perfect ? cfg().half * DEG : Math.max(MIN_HALF_DEG * DEG, S.half * SHRINK_FACTOR);
 }
@@ -302,17 +303,7 @@ function tap() {
     S.lockout = now + MISS_LOCKOUT_MS;
     S.flash = { t0: now };
     S.shake = 1;
-
-    // A miss drops the most recently set pin, shrinks the next notch, and the dropped pin
-    // has to be set again on a fresh notch (needle speed falls back to match the pin count).
-    const dropped = S.set.pop();
-    if (dropped?.perfect) S.perfects--;
-    S.half = nextHalf(false);
-    S.plugTarget = (S.set.length / cfg().pins) * 80 * DEG;
-    S.speed = cfg().speed * DEG * (1 + SPEEDUP_PER_PIN * S.set.length);
-    placeTarget();
-    toast(dropped ? 'Pin dropped' : 'Missed', 'bad');
-    renderPins();
+    toast('Missed', 'bad');
     renderPicks();
     if (S.picks <= 0) {
       S.phase = 'broken';
@@ -323,6 +314,21 @@ function tap() {
       sfx.miss();
     }
   }
+}
+
+// The needle left the notch without a tap: the most recently set pin drops back down.
+// The notch stays where it is, so every further lap past it costs another pin.
+function overshoot(now) {
+  const dropped = S.set.pop();
+  if (!dropped) return;
+  if (dropped.perfect) S.perfects--;
+  S.plugTarget = (S.set.length / cfg().pins) * 80 * DEG;
+  S.speed = cfg().speed * DEG * (1 + SPEEDUP_PER_PIN * S.set.length);
+  S.flash = { t0: now };
+  S.shake = Math.max(S.shake, 0.6);
+  sfx.drop();
+  toast('Pin dropped', 'bad');
+  renderPins();
 }
 
 const stage = $('stage');
@@ -370,7 +376,7 @@ function showOverlay(kind) {
   const L = cfg();
   const lastLevel = S.level === LEVELS.length - 1;
   const views = {
-    ready:  ['Pick the lock', `Tap when the needle crosses the glowing notch. Set all ${L.pins} tumblers before your picks snap. Anything short of perfect shrinks the next notch, and a miss drops your last pin.`,
+    ready:  ['Pick the lock', `Tap when the needle crosses the glowing notch. Set all ${L.pins} tumblers before your picks snap. A mistimed tap costs a pick. A non-perfect hit shrinks the next notch by 10%, and letting the needle slip past the notch drops your last pin.`,
              [['start', 'Start', '']]],
     won:    ['Unlocked', `${S.picks} of ${PICKS} picks left${S.perfects ? ` · ${S.perfects} perfect` : ''}.`,
              [['next', lastLevel ? 'Another lock' : 'Next lock', ''], ['again', 'Replay this lock', 'ghost']]],
@@ -545,8 +551,14 @@ function frame(now) {
   const dt = Math.max(0, Math.min((now - S.frameT) / 1000, 0.05));
   S.frameT = now;
 
-  if (S.phase === 'playing') S.needle = wrap(S.needle + S.dir * S.speed * dt);
-  else if (S.phase === 'ready') S.needle = wrap(S.needle + 50 * DEG * dt);
+  if (S.phase === 'playing') {
+    const step = S.speed * dt;
+    // Distance the needle still has to travel (in its direction) to reach the notch's far edge.
+    // Sweep-tested, so it still registers if a long frame skips right over a narrow notch.
+    const toExit = wrap(S.dir * (S.target + S.dir * S.half - S.needle));
+    S.needle = wrap(S.needle + S.dir * step);
+    if (toExit > 0 && toExit <= step) overshoot(now);
+  } else if (S.phase === 'ready') S.needle = wrap(S.needle + 50 * DEG * dt);
 
   S.plug += (S.plugTarget - S.plug) * (1 - Math.exp(-dt * 7));
   S.shake = Math.max(0, S.shake - dt * 4);
