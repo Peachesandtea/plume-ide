@@ -139,6 +139,8 @@ const SPEEDUP_PER_PIN  = 0.08;  // each set pin speeds the needle up by this fra
 const PERFECT_FRACTION = 0.30;  // inner fraction of the notch that counts as "perfect"
 const MISS_LOCKOUT_MS  = 250;   // brief lockout after a miss to discourage mashing
 const MIN_TARGET_GAP   = 70 * DEG; // new notch is at least this far from the needle
+const SHRINK_FACTOR    = 0.85;  // any non-perfect attempt makes the next notch 15% smaller (compounds)
+const MIN_HALF_DEG     = 3;     // floor so a notch can never shrink to something unhittable
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -232,15 +234,20 @@ function newLock() {
 }
 
 function placeTarget() {
-  const minGap = 2 * S.half + 4 * DEG;
   let c = 0;
   for (let i = 0; i < 60; i++) {
     c = rand(0, TAU);
     if (Math.abs(angDiff(c, S.needle)) < MIN_TARGET_GAP) continue;
-    if (S.set.some(s => Math.abs(angDiff(c, s.c)) < minGap)) continue;
+    // set notches can have different widths now, so compare against each one's own half-width
+    if (S.set.some(s => Math.abs(angDiff(c, s.c)) < s.half + S.half + 4 * DEG)) continue;
     break;
   }
   S.target = c;
+}
+
+// A perfect hit restores the full-size notch; anything else shrinks the next one by 15%.
+function nextHalf(perfect) {
+  return perfect ? cfg().half * DEG : Math.max(MIN_HALF_DEG * DEG, S.half * SHRINK_FACTOR);
 }
 
 function start() {
@@ -266,11 +273,15 @@ function tap() {
 
   if (d <= S.half) {
     const perfect = d <= S.half * PERFECT_FRACTION;
-    S.set.push({ c: S.target, perfect });
+    const next = nextHalf(perfect);                    // size of the following notch
+    const wasShrunk = S.half < cfg().half * DEG - 1e-9;
+    S.set.push({ c: S.target, perfect, half: S.half });
     if (perfect) S.perfects++;
-    S.bursts.push({ c: S.target, t0: now, perfect });
+    S.bursts.push({ c: S.target, t0: now, perfect, half: S.half });
     sfx.hit(S.set.length, perfect);
-    toast(perfect ? 'Perfect' : 'Set', perfect ? 'perfect' : 'good');
+    toast(perfect ? (wasShrunk ? 'Perfect · notch reset' : 'Perfect')
+                  : (next < S.half - 1e-9 ? 'Set · notch shrinks' : 'Set'),
+          perfect ? 'perfect' : 'good');
     renderPins();
 
     const total = cfg().pins;
@@ -283,6 +294,7 @@ function tap() {
       S.plugTarget = (S.set.length / total) * 80 * DEG;
       S.speed = cfg().speed * DEG * (1 + SPEEDUP_PER_PIN * S.set.length);
       S.dir = -S.dir;
+      S.half = next;
       placeTarget();
     }
   } else {
@@ -290,7 +302,17 @@ function tap() {
     S.lockout = now + MISS_LOCKOUT_MS;
     S.flash = { t0: now };
     S.shake = 1;
-    toast('Missed', 'bad');
+
+    // A miss drops the most recently set pin, shrinks the next notch, and the dropped pin
+    // has to be set again on a fresh notch (needle speed falls back to match the pin count).
+    const dropped = S.set.pop();
+    if (dropped?.perfect) S.perfects--;
+    S.half = nextHalf(false);
+    S.plugTarget = (S.set.length / cfg().pins) * 80 * DEG;
+    S.speed = cfg().speed * DEG * (1 + SPEEDUP_PER_PIN * S.set.length);
+    placeTarget();
+    toast(dropped ? 'Pin dropped' : 'Missed', 'bad');
+    renderPins();
     renderPicks();
     if (S.picks <= 0) {
       S.phase = 'broken';
@@ -348,7 +370,7 @@ function showOverlay(kind) {
   const L = cfg();
   const lastLevel = S.level === LEVELS.length - 1;
   const views = {
-    ready:  ['Pick the lock', `Tap when the needle crosses the glowing notch. Set all ${L.pins} tumblers before your picks snap.`,
+    ready:  ['Pick the lock', `Tap when the needle crosses the glowing notch. Set all ${L.pins} tumblers before your picks snap. Anything short of perfect shrinks the next notch, and a miss drops your last pin.`,
              [['start', 'Start', '']]],
     won:    ['Unlocked', `${S.picks} of ${PICKS} picks left${S.perfects ? ` · ${S.perfects} perfect` : ''}.`,
              [['next', lastLevel ? 'Another lock' : 'Next lock', ''], ['again', 'Replay this lock', 'ghost']]],
@@ -440,7 +462,7 @@ function draw(now) {
 
   // Notches already set
   for (const s of S.set) {
-    ctx.beginPath(); arc(s.c - S.half, s.c + S.half, TR);
+    ctx.beginPath(); arc(s.c - s.half, s.c + s.half, TR);
     ctx.lineWidth = TW; ctx.strokeStyle = s.perfect ? 'rgba(157,143,255,.38)' : 'rgba(110,231,168,.32)'; ctx.stroke();
   }
 
@@ -471,7 +493,7 @@ function draw(now) {
   S.bursts = S.bursts.filter(b => now - b.t0 < 500);
   for (const b of S.bursts) {
     const age = (now - b.t0) / 500;
-    ctx.beginPath(); arc(b.c - S.half * 1.2, b.c + S.half * 1.2, TR + TW / 2 + age * 0.2);
+    ctx.beginPath(); arc(b.c - b.half * 1.2, b.c + b.half * 1.2, TR + TW / 2 + age * 0.2);
     ctx.lineWidth = 0.02 * (1 - age) + 0.004;
     ctx.strokeStyle = (b.perfect ? 'rgba(157,143,255,' : 'rgba(110,231,168,') + (1 - age) + ')'; ctx.stroke();
   }
